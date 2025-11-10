@@ -38,10 +38,10 @@ serial_cpp::list_ports()
 	vector<PortInfo> devices_found;
 
 	HDEVINFO device_info_set = SetupDiGetClassDevs(
-		(const GUID *) &GUID_DEVCLASS_PORTS,
+		(const GUID *) &GUID_DEVINTERFACE_COMPORT,
 		NULL,
 		NULL,
-		DIGCF_PRESENT);
+		DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
 	unsigned int device_info_set_index = 0;
 	SP_DEVINFO_DATA device_info_data;
