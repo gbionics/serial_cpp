@@ -39,15 +39,6 @@ Serial::SerialImpl::SerialImpl (const string &port, unsigned long baudrate,
     baudrate_ (baudrate), parity_ (parity),
     bytesize_ (bytesize), stopbits_ (stopbits), flowcontrol_ (flowcontrol)
 {
-  // Initialize overlapped structures
-  memset(&read_overlapped_, 0, sizeof(read_overlapped_));
-  memset(&write_overlapped_, 0, sizeof(write_overlapped_));
-  memset(&wait_overlapped_, 0, sizeof(wait_overlapped_));
-
-  read_overlapped_.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-  write_overlapped_.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-  wait_overlapped_.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-
   if (port_.empty () == false)
     open ();
   read_mutex = CreateMutex(NULL, false, NULL);
@@ -59,12 +50,6 @@ Serial::SerialImpl::~SerialImpl ()
   this->close();
   CloseHandle(read_mutex);
   CloseHandle(write_mutex);
-  if (read_overlapped_.hEvent != NULL)
-    CloseHandle(read_overlapped_.hEvent);
-  if (write_overlapped_.hEvent != NULL)
-    CloseHandle(write_overlapped_.hEvent);
-  if (wait_overlapped_.hEvent != NULL)
-    CloseHandle(wait_overlapped_.hEvent);
 }
 
 void
@@ -85,7 +70,7 @@ Serial::SerialImpl::open ()
                     0,
                     0,
                     OPEN_EXISTING,
-                    FILE_FLAG_OVERLAPPED,
+                    FILE_ATTRIBUTE_NORMAL,
                     0);
 
   if (fd_ == INVALID_HANDLE_VALUE) {
@@ -278,9 +263,6 @@ Serial::SerialImpl::reconfigurePort ()
   }
 
   // Setup timeouts
-  // With overlapped I/O, we set COMMTIMEOUTS to return immediately
-  // and handle timeouts ourselves via WaitForSingleObject on the
-  // overlapped event. This allows read and write to not block each other.
   COMMTIMEOUTS timeouts = {0};
   timeouts.ReadIntervalTimeout = timeout_.inter_byte_timeout;
   timeouts.ReadTotalTimeoutConstant = timeout_.read_timeout_constant;
@@ -297,8 +279,6 @@ Serial::SerialImpl::close ()
 {
   if (is_open_ == true) {
     if (fd_ != INVALID_HANDLE_VALUE) {
-      // Cancel any pending I/O operations
-      CancelIo(fd_);
       int ret;
       ret = CloseHandle(fd_);
       if (ret == 0) {
@@ -335,77 +315,16 @@ Serial::SerialImpl::available ()
 }
 
 bool
-Serial::SerialImpl::waitReadable (uint32_t timeout)
+Serial::SerialImpl::waitReadable (uint32_t /*timeout*/)
 {
-  if (!is_open_) {
-    throw PortNotOpenedException ("Serial::waitReadable");
-  }
-
-  // Check if data is already available
-  if (available() > 0) {
-    return true;
-  }
-
-  // Use WaitCommEvent with overlapped I/O to wait for incoming data
-  DWORD event_mask = 0;
-  ResetEvent(wait_overlapped_.hEvent);
-
-  if (!SetCommMask(fd_, EV_RXCHAR)) {
-    THROW (IOException, "Error setting comm mask for waitReadable.");
-  }
-
-  if (!WaitCommEvent(fd_, &event_mask, &wait_overlapped_)) {
-    if (GetLastError() != ERROR_IO_PENDING) {
-      THROW (IOException, "Error in WaitCommEvent.");
-    }
-    // Wait for the event or timeout
-    DWORD wait_result = WaitForSingleObject(wait_overlapped_.hEvent, timeout);
-    if (wait_result == WAIT_OBJECT_0) {
-      return true;
-    } else if (wait_result == WAIT_TIMEOUT) {
-      // Cancel the pending wait
-      CancelIo(fd_);
-      return false;
-    } else {
-      THROW (IOException, "Error waiting for readable event.");
-    }
-  }
-
-  // WaitCommEvent completed immediately
-  return true;
+  THROW (IOException, "waitReadable is not implemented on Windows.");
+  return false;
 }
 
 void
-Serial::SerialImpl::waitByteTimes (size_t count)
+Serial::SerialImpl::waitByteTimes (size_t /*count*/)
 {
-  if (!is_open_) {
-    throw PortNotOpenedException ("Serial::waitByteTimes");
-  }
-  // Calculate the time to wait based on baud rate
-  // bits_per_byte = start(1) + data(bytesize) + parity(0/1) + stop(1/1.5/2)
-  uint32_t bits_per_byte = 1; // start bit
-  switch (bytesize_) {
-    case fivebits:  bits_per_byte += 5; break;
-    case sixbits:   bits_per_byte += 6; break;
-    case sevenbits: bits_per_byte += 7; break;
-    case eightbits: bits_per_byte += 8; break;
-  }
-  if (parity_ != parity_none)
-    bits_per_byte += 1;
-  switch (stopbits_) {
-    case stopbits_one:            bits_per_byte += 1; break;
-    case stopbits_one_point_five: bits_per_byte += 2; break; // approximate
-    case stopbits_two:            bits_per_byte += 2; break;
-  }
-
-  // Time in ms for 'count' bytes
-  if (baudrate_ > 0) {
-    DWORD ms = static_cast<DWORD>(
-      (1000.0 * bits_per_byte * count) / baudrate_ + 0.5);
-    if (ms > 0) {
-      Sleep(ms);
-    }
-  }
+  THROW (IOException, "waitByteTimes is not implemented on Windows.");
 }
 
 size_t
@@ -414,51 +333,13 @@ Serial::SerialImpl::read (uint8_t *buf, size_t size)
   if (!is_open_) {
     throw PortNotOpenedException ("Serial::read");
   }
-
-  ResetEvent(read_overlapped_.hEvent);
-
-  DWORD bytes_read = 0;
-  if (!ReadFile(fd_, buf, static_cast<DWORD>(size), &bytes_read, &read_overlapped_)) {
-    DWORD err = GetLastError();
-    if (err != ERROR_IO_PENDING) {
-      stringstream ss;
-      ss << "Error while reading from the serial port: " << err;
-      THROW (IOException, ss.str().c_str());
-    }
-
-    // I/O is pending - wait with timeout
-    DWORD timeout_ms = timeout_.read_timeout_constant +
-                       timeout_.read_timeout_multiplier * static_cast<DWORD>(size);
-    if (timeout_ms == 0) {
-      timeout_ms = INFINITE;
-    }
-
-    DWORD wait_result = WaitForSingleObject(read_overlapped_.hEvent, timeout_ms);
-    switch (wait_result) {
-    case WAIT_OBJECT_0:
-      // Operation completed
-      if (!GetOverlappedResult(fd_, &read_overlapped_, &bytes_read, FALSE)) {
-        stringstream ss;
-        ss << "Error getting overlapped read result: " << GetLastError();
-        THROW (IOException, ss.str().c_str());
-      }
-      break;
-    case WAIT_TIMEOUT:
-      // Timeout - cancel the pending operation and get partial result
-      CancelIo(fd_);
-      // Wait for cancellation to complete
-      GetOverlappedResult(fd_, &read_overlapped_, &bytes_read, TRUE);
-      break;
-    default:
-      {
-        stringstream ss;
-        ss << "Error waiting for read completion: " << GetLastError();
-        THROW (IOException, ss.str().c_str());
-      }
-    }
+  DWORD bytes_read;
+  if (!ReadFile(fd_, buf, static_cast<DWORD>(size), &bytes_read, NULL)) {
+    stringstream ss;
+    ss << "Error while reading from the serial port: " << GetLastError();
+    THROW (IOException, ss.str().c_str());
   }
-
-  return static_cast<size_t>(bytes_read);
+  return (size_t) (bytes_read);
 }
 
 size_t
@@ -467,50 +348,13 @@ Serial::SerialImpl::write (const uint8_t *data, size_t length)
   if (is_open_ == false) {
     throw PortNotOpenedException ("Serial::write");
   }
-
-  ResetEvent(write_overlapped_.hEvent);
-
-  DWORD bytes_written = 0;
-  if (!WriteFile(fd_, data, static_cast<DWORD>(length), &bytes_written, &write_overlapped_)) {
-    DWORD err = GetLastError();
-    if (err != ERROR_IO_PENDING) {
-      stringstream ss;
-      ss << "Error while writing to the serial port: " << err;
-      THROW (IOException, ss.str().c_str());
-    }
-
-    // I/O is pending - wait with timeout
-    DWORD timeout_ms = timeout_.write_timeout_constant +
-                       timeout_.write_timeout_multiplier * static_cast<DWORD>(length);
-    if (timeout_ms == 0) {
-      timeout_ms = INFINITE;
-    }
-
-    DWORD wait_result = WaitForSingleObject(write_overlapped_.hEvent, timeout_ms);
-    switch (wait_result) {
-    case WAIT_OBJECT_0:
-      // Operation completed
-      if (!GetOverlappedResult(fd_, &write_overlapped_, &bytes_written, FALSE)) {
-        stringstream ss;
-        ss << "Error getting overlapped write result: " << GetLastError();
-        THROW (IOException, ss.str().c_str());
-      }
-      break;
-    case WAIT_TIMEOUT:
-      // Timeout - cancel the pending operation
-      CancelIo(fd_);
-      GetOverlappedResult(fd_, &write_overlapped_, &bytes_written, TRUE);
-      break;
-    default:
-      {
-        stringstream ss;
-        ss << "Error waiting for write completion: " << GetLastError();
-        THROW (IOException, ss.str().c_str());
-      }
-    }
+  DWORD bytes_written;
+  if (!WriteFile(fd_, data, static_cast<DWORD>(length), &bytes_written, NULL)) {
+    stringstream ss;
+    ss << "Error while writing to the serial port: " << GetLastError();
+    THROW (IOException, ss.str().c_str());
   }
-
-  return static_cast<size_t>(bytes_written);
+  return (size_t) (bytes_written);
 }
 
 void
@@ -700,29 +544,13 @@ Serial::SerialImpl::waitForChange ()
     return false;
   }
 
-  OVERLAPPED ov = {0};
-  ov.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ov.hEvent == NULL) {
+  if (!WaitCommEvent(fd_, &dwCommEvent, NULL)) {
+    // An error occurred waiting for the event.
     return false;
+  } else {
+    // Event has occurred.
+    return true;
   }
-
-  if (!WaitCommEvent(fd_, &dwCommEvent, &ov)) {
-    if (GetLastError() != ERROR_IO_PENDING) {
-      CloseHandle(ov.hEvent);
-      return false;
-    }
-    // Wait indefinitely for the event
-    DWORD wait_result = WaitForSingleObject(ov.hEvent, INFINITE);
-    CloseHandle(ov.hEvent);
-    if (wait_result == WAIT_OBJECT_0) {
-      return true;
-    }
-    return false;
-  }
-
-  CloseHandle(ov.hEvent);
-  // Event has occurred.
-  return true;
 }
 
 bool
