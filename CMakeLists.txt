@@ -90,10 +90,20 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-## Uncomment for example
+## Examples
 add_executable(serial_cpp_example examples/serial_cpp_example.cc)
 add_dependencies(serial_cpp_example ${PROJECT_NAME}::${PROJECT_NAME})
 target_link_libraries(serial_cpp_example ${PROJECT_NAME}::${PROJECT_NAME})
+
+## Async test example (demonstrates concurrent read/write)
+add_executable(serial_cpp_async_test examples/serial_cpp_async_test.cc)
+add_dependencies(serial_cpp_async_test ${PROJECT_NAME}::${PROJECT_NAME})
+target_link_libraries(serial_cpp_async_test ${PROJECT_NAME}::${PROJECT_NAME})
+if(WIN32)
+    target_link_libraries(serial_cpp_async_test Threads::Threads)
+endif()
+find_package(Threads REQUIRED)
+target_link_libraries(serial_cpp_async_test Threads::Threads)
 
 ## Install library
 if(serial_cpp_INSTALL)
