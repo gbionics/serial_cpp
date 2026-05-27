@@ -31,6 +31,7 @@
  * \section DESCRIPTION
  *
  * This provides a windows implementation of the Serial class interface.
+ * Uses overlapped (asynchronous) I/O to allow concurrent read/write.
  *
  */
 
@@ -198,6 +199,11 @@ private:
   HANDLE read_mutex;
   // Mutex used to lock the write functions
   HANDLE write_mutex;
+
+  // Overlapped structures for async I/O
+  OVERLAPPED read_overlapped_;
+  OVERLAPPED write_overlapped_;
+  OVERLAPPED wait_overlapped_;
 };
 
 }
