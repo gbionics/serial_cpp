@@ -19,6 +19,11 @@ mark_as_advanced(serial_cpp_INSTALL)
 option(serial_cpp_FORCE_RESPECT_BUILD_TESTING "If also BUILD_TESTING is ON, enable tests even if project was included via add_subdirectory/FetchContent" OFF)
 mark_as_advanced(serial_cpp_FORCE_RESPECT_BUILD_TESTING)
 
+# Windows async (overlapped) I/O option
+# When ON, uses FILE_FLAG_OVERLAPPED allowing concurrent read/write from different threads.
+# When OFF (default), uses the original blocking synchronous implementation.
+option(SERIAL_CPP_WIN_ASYNC "Use overlapped (async) I/O on Windows for non-blocking concurrent read/write" OFF)
+
 # Detect if project is top level or not (fall back for CMake < 3.21)
 if(CMAKE_VERSION VERSION_LESS "3.21.0")
     if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -54,7 +59,11 @@ elseif(UNIX)
     list(APPEND serial_cpp_SRCS src/impl/list_ports/list_ports_linux.cc)
 else()
     # If windows
-    list(APPEND serial_cpp_SRCS src/impl/win.cc)
+    if(SERIAL_CPP_WIN_ASYNC)
+        list(APPEND serial_cpp_SRCS src/impl/win_async.cc)
+    else()
+        list(APPEND serial_cpp_SRCS src/impl/win.cc)
+    endif()
     list(APPEND serial_cpp_SRCS src/impl/list_ports/list_ports_win.cc)
 endif()
 
