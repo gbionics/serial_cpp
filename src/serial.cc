@@ -12,7 +12,11 @@
 #include "serial_cpp/serial.h"
 
 #ifdef _WIN32
+#ifdef SERIAL_CPP_WIN_ASYNC
+#include "serial_cpp/impl/win_async.h"
+#else
 #include "serial_cpp/impl/win.h"
+#endif
 #else
 #include "serial_cpp/impl/unix.h"
 #endif

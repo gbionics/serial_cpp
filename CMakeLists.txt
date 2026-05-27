@@ -22,7 +22,7 @@ mark_as_advanced(serial_cpp_FORCE_RESPECT_BUILD_TESTING)
 # Windows async (overlapped) I/O option
 # When ON, uses FILE_FLAG_OVERLAPPED allowing concurrent read/write from different threads.
 # When OFF (default), uses the original blocking synchronous implementation.
-option(SERIAL_CPP_WIN_ASYNC "Use overlapped (async) I/O on Windows for non-blocking concurrent read/write" OFF)
+option(SERIAL_CPP_WIN_ASYNC "Use overlapped (async) I/O on Windows for non-blocking concurrent read/write" ON)
 
 # Detect if project is top level or not (fall back for CMake < 3.21)
 if(CMAKE_VERSION VERSION_LESS "3.21.0")
@@ -100,6 +100,12 @@ add_executable(serial_cpp_async_test examples/serial_cpp_async_test.cc)
 add_dependencies(serial_cpp_async_test ${PROJECT_NAME}::${PROJECT_NAME})
 target_link_libraries(serial_cpp_async_test ${PROJECT_NAME}::${PROJECT_NAME})
 if(WIN32)
+
+
+    if(SERIAL_CPP_WIN_ASYNC)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE -DSERIAL_CPP_WIN_ASYNC)
+    endif()
+
     target_link_libraries(serial_cpp_async_test Threads::Threads)
 endif()
 find_package(Threads REQUIRED)
