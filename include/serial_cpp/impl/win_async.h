@@ -203,10 +203,14 @@ private:
   // Mutex used to lock the write functions
   HANDLE write_mutex;
 
-  // Overlapped structures for async I/O
-  OVERLAPPED read_overlapped_;
-  OVERLAPPED write_overlapped_;
-  OVERLAPPED wait_overlapped_;
+  // Events for overlapped I/O (persistent, one per operation type)
+  HANDLE read_event_;
+  HANDLE write_event_;
+  HANDLE wait_event_;
+
+  // WaitCommEvent writes here asynchronously - MUST be a class member,
+  // NOT a stack variable, because the kernel writes to it after the call returns.
+  DWORD wait_comm_event_mask_;
 };
 
 }
